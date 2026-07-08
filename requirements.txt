@@ -1,0 +1,6 @@
+flask
+pillow
+qrcode[pil]
+gunicorn
+requests
+pypdf
