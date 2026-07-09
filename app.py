@@ -63,7 +63,7 @@ def lag_billett():
     arr_font = get_font(50)
     bbox = draw2.textbbox((0, 0), arrangement, font=arr_font)
     arr_w = bbox[2] - bbox[0]
-    midX = int((200 * 2.778 + 440 * 2.778) / 2)
+    midX = 800  # Sentrum av grønt felt (mellom sprellemannen og hvit stubb)
     draw2.text((midX - arr_w // 2, 210), arrangement, font=arr_font, fill=krem)
 
     # QR-kode
