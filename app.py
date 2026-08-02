@@ -24,6 +24,211 @@ def get_font_regular(size):
 def helse():
     return jsonify({"ok": True})
 
+# ═══ FRIVILLIG-KONTRAKT OG HENDELSESRAPPORT (PDF) ═══
+
+PAGE_W, PAGE_H = 1240, 1754  # ca. A4 ved 150 dpi
+MARGIN = 90
+DGREEN = (74, 93, 36)
+GREEN = (181, 200, 0)
+INK = (40, 40, 35)
+GREY = (110, 110, 105)
+
+def wrap_text(draw, text, font, max_width):
+    lines = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            lines.append("")
+            continue
+        words = paragraph.split(" ")
+        cur = ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            bbox = draw.textbbox((0, 0), trial, font=font)
+            if bbox[2] - bbox[0] > max_width and cur:
+                lines.append(cur)
+                cur = w
+            else:
+                cur = trial
+        lines.append(cur)
+    return lines
+
+def new_page():
+    img = Image.new("RGB", (PAGE_W, PAGE_H), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 0, PAGE_W, 14], fill=DGREEN)
+    return img, draw
+
+def draw_footer(draw, page_num, total, label):
+    draw.text((MARGIN, PAGE_H - 60), label, font=get_font_regular(18), fill=GREY)
+    txt = f"Side {page_num} av {total}"
+    f = get_font_regular(18)
+    bbox = draw.textbbox((0, 0), txt, font=f)
+    draw.text((PAGE_W - MARGIN - (bbox[2] - bbox[0]), PAGE_H - 60), txt, font=f, fill=GREY)
+
+@app.route("/frivillig-kontrakt", methods=["POST"])
+def lag_kontrakt():
+    data = request.json
+    navn = data.get("navn", "")
+    alder = str(data.get("alder", ""))
+    telefon = data.get("telefon", "")
+    epost = data.get("epost", "")
+    rolle = data.get("rolle", "")
+    dato = data.get("dato", "")
+    kontrakt_tekst = data.get("kontraktTekst", "")
+    signatur_b64 = data.get("signaturB64", "")
+
+    title_font = get_font(46)
+    h2_font = get_font(26)
+    label_font = get_font_regular(20)
+    value_font = get_font(22)
+    body_font = get_font_regular(21)
+
+    pages = []
+    img, draw = new_page()
+    y = 70
+    draw.text((MARGIN, y), "Norsjø Bygdeungdomslag", font=get_font(24), fill=GREY)
+    y += 50
+    draw.text((MARGIN, y), "Frivilligavtale", font=title_font, fill=DGREEN)
+    y += 80
+
+    felt = [("Navn", navn), ("Alder", alder + " år"), ("Telefon", telefon),
+            ("E-post", epost), ("Rolle", rolle), ("Dato signert", dato)]
+    col_w = (PAGE_W - 2 * MARGIN) // 2
+    for i, (label, verdi) in enumerate(felt):
+        col = i % 2
+        row = i // 2
+        x = MARGIN + col * col_w
+        yy = y + row * 62
+        draw.text((x, yy), label.upper(), font=label_font, fill=GREY)
+        draw.text((x, yy + 24), str(verdi), font=value_font, fill=INK)
+    y += (len(felt) + 1) // 2 * 62 + 30
+    draw.line([(MARGIN, y), (PAGE_W - MARGIN, y)], fill=(220, 218, 205), width=2)
+    y += 40
+
+    draw.text((MARGIN, y), "Vilkår for frivillig arbeid", font=h2_font, fill=DGREEN)
+    y += 46
+
+    lines = wrap_text(draw, kontrakt_tekst, body_font, PAGE_W - 2 * MARGIN)
+    max_y = PAGE_H - 260
+    for line in lines:
+        if y > max_y:
+            pages.append(img)
+            img, draw = new_page()
+            y = 80
+        draw.text((MARGIN, y), line, font=body_font, fill=INK)
+        y += 32
+
+    # Signatur nederst på siste side (ny side hvis ikke nok plass)
+    if y > PAGE_H - 320:
+        pages.append(img)
+        img, draw = new_page()
+        y = 80
+    y = max(y + 40, PAGE_H - 300)
+    draw.line([(MARGIN, y), (PAGE_W - MARGIN, y)], fill=(220, 218, 205), width=2)
+    y += 30
+    draw.text((MARGIN, y), "Elektronisk signatur", font=label_font, fill=GREY)
+    y += 30
+    if signatur_b64:
+        try:
+            sig_bytes = base64.b64decode(signatur_b64.split(",")[-1])
+            sig_img = Image.open(io.BytesIO(sig_bytes)).convert("RGBA")
+            sig_w = 360
+            ratio = sig_w / sig_img.width
+            sig_img = sig_img.resize((sig_w, int(sig_img.height * ratio)))
+            bg = Image.new("RGBA", sig_img.size, (255, 255, 255, 255))
+            bg.paste(sig_img, (0, 0), sig_img)
+            img.paste(bg.convert("RGB"), (MARGIN, y))
+            y += bg.height + 10
+        except Exception:
+            pass
+    draw.text((MARGIN, y), f"{navn} – signert {dato}", font=value_font, fill=INK)
+    pages.append(img)
+
+    total = len(pages)
+    for i, p in enumerate(pages):
+        d = ImageDraw.Draw(p)
+        draw_footer(d, i + 1, total, "Norsjø Bygdeungdomslag – Frivilligavtale")
+
+    buf = io.BytesIO()
+    pages[0].save(buf, "PDF", save_all=True, append_images=pages[1:])
+    buf.seek(0)
+    return jsonify({"ok": True, "pdf": base64.b64encode(buf.read()).decode()})
+
+@app.route("/hendelsesrapport", methods=["POST"])
+def lag_hendelsesrapport():
+    data = request.json
+    navn = data.get("navn", "")
+    tittel = data.get("tittel", "")
+    beskrivelse = data.get("beskrivelse", "")
+    arrangement = data.get("arrangement", "")
+    dato = data.get("dato", "")
+    bilder_b64 = data.get("bilderB64", [])
+
+    title_font = get_font(40)
+    h2_font = get_font(24)
+    label_font = get_font_regular(20)
+    value_font = get_font(22)
+    body_font = get_font_regular(21)
+
+    pages = []
+    img, draw = new_page()
+    y = 70
+    draw.text((MARGIN, y), "Norsjø Bygdeungdomslag", font=get_font(24), fill=GREY)
+    y += 50
+    draw.text((MARGIN, y), "Hendelsesrapport", font=title_font, fill=DGREEN)
+    y += 74
+
+    felt = [("Innsendt av", navn), ("Dato", dato), ("Arrangement", arrangement or "Ikke oppgitt")]
+    for label, verdi in felt:
+        draw.text((MARGIN, y), label.upper(), font=label_font, fill=GREY)
+        draw.text((MARGIN + 260, y - 2), str(verdi), font=value_font, fill=INK)
+        y += 38
+    y += 20
+    draw.line([(MARGIN, y), (PAGE_W - MARGIN, y)], fill=(220, 218, 205), width=2)
+    y += 40
+
+    draw.text((MARGIN, y), tittel, font=h2_font, fill=DGREEN)
+    y += 46
+
+    lines = wrap_text(draw, beskrivelse, body_font, PAGE_W - 2 * MARGIN)
+    max_y = PAGE_H - 140
+    for line in lines:
+        if y > max_y:
+            pages.append(img)
+            img, draw = new_page()
+            y = 80
+        draw.text((MARGIN, y), line, font=body_font, fill=INK)
+        y += 32
+    pages.append(img)
+
+    # Bilder, ett per side, tilpasset sideformat
+    for b64 in bilder_b64:
+        try:
+            photo = Image.open(io.BytesIO(base64.b64decode(b64.split(",")[-1]))).convert("RGB")
+        except Exception:
+            continue
+        pimg, pdraw = new_page()
+        pdraw.text((MARGIN, 60), "Bilde til hendelsesrapport", font=label_font, fill=GREY)
+        max_w = PAGE_W - 2 * MARGIN
+        max_h = PAGE_H - 220
+        ratio = min(max_w / photo.width, max_h / photo.height)
+        new_size = (int(photo.width * ratio), int(photo.height * ratio))
+        photo = photo.resize(new_size)
+        px = (PAGE_W - new_size[0]) // 2
+        py = 110 + (max_h - new_size[1]) // 2
+        pimg.paste(photo, (px, py))
+        pages.append(pimg)
+
+    total = len(pages)
+    for i, p in enumerate(pages):
+        d = ImageDraw.Draw(p)
+        draw_footer(d, i + 1, total, "Norsjø Bygdeungdomslag – Hendelsesrapport")
+
+    buf = io.BytesIO()
+    pages[0].save(buf, "PDF", save_all=True, append_images=pages[1:])
+    buf.seek(0)
+    return jsonify({"ok": True, "pdf": base64.b64encode(buf.read()).decode()})
+
 @app.route("/billett", methods=["POST"])
 def lag_billett():
     data = request.json
