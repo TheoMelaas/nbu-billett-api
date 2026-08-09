@@ -154,6 +154,60 @@ def lag_kontrakt():
     buf.seek(0)
     return jsonify({"ok": True, "pdf": base64.b64encode(buf.read()).decode()})
 
+@app.route("/vaktkurs-diplom", methods=["POST"])
+def lag_vaktkurs_diplom():
+    data = request.json
+    navn = data.get("navn", "")
+    dato = data.get("dato", "")
+    poeng = data.get("poeng", "")
+    maks = data.get("maks", "")
+
+    img, draw = new_page()
+
+    # Ramme rundt hele diplomet
+    draw.rectangle([MARGIN - 30, 70, PAGE_W - MARGIN + 30, PAGE_H - 120], outline=DGREEN, width=4)
+    draw.rectangle([MARGIN - 20, 80, PAGE_W - MARGIN + 20, PAGE_H - 130], outline=GREEN, width=2)
+
+    def midtstill(tekst, font, y, farge):
+        bbox = draw.textbbox((0, 0), tekst, font=font)
+        x = (PAGE_W - (bbox[2] - bbox[0])) // 2
+        draw.text((x, y), tekst, font=font, fill=farge)
+        return y + (bbox[3] - bbox[1])
+
+    y = 300
+    y = midtstill("NORSJØ BYGDEUNGDOMSLAG", get_font(28), y, GREY) + 70
+    y = midtstill("DIPLOM", get_font(90), y, DGREEN) + 50
+    y = midtstill("Sertifisert vakt", get_font(46), y, GREEN) + 120
+
+    y = midtstill("Dette bekrefter at", get_font_regular(26), y, INK) + 60
+    y = midtstill(navn, get_font(56), y, DGREEN) + 80
+
+    brodtekst = ("har gjennomført og bestått vaktkurset til Norsjø Bygdeungdomslag, "
+                 "og er med det sertifisert til å ha vaktoppdrag på arrangementene våre.")
+    body_font = get_font_regular(24)
+    for linje in wrap_text(draw, brodtekst, body_font, PAGE_W - 2 * MARGIN - 120):
+        y = midtstill(linje, body_font, y, INK) + 18
+    y += 100
+
+    if poeng != "" and maks != "":
+        y = midtstill(f"Resultat på kunnskapsprøven: {poeng} av {maks} riktige", get_font(26), y, INK) + 80
+
+    y = midtstill(f"Bestått {dato}", get_font_regular(24), y, GREY) + 150
+
+    # Signaturlinje
+    linje_bredde = 420
+    x0 = (PAGE_W - linje_bredde) // 2
+    draw.line([(x0, y), (x0 + linje_bredde, y)], fill=INK, width=2)
+    y += 18
+    midtstill("Norsjø Bygdeungdomslag", get_font_regular(22), y, GREY)
+
+    draw_footer(draw, 1, 1, "Norsjø Bygdeungdomslag, diplom for sertifisert vakt")
+
+    buf = io.BytesIO()
+    img.save(buf, "PDF")
+    buf.seek(0)
+    return jsonify({"ok": True, "pdf": base64.b64encode(buf.read()).decode()})
+
 @app.route("/hendelsesrapport", methods=["POST"])
 def lag_hendelsesrapport():
     data = request.json
